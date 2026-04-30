@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>可預約時段產生器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+    /* Calendar */
+    .cal-day {
+      aspect-ratio: 1;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 8px; font-size: 13px; cursor: pointer;
+      transition: background .12s, color .12s;
+      font-weight: 500; position: relative;
+    }
+    .cal-day:hover:not(.other-month) { background: #eff6ff; }
+    .cal-day.today::after {
+      content: ''; position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
+      width: 4px; height: 4px; border-radius: 50%; background: #2563eb;
+    }
+    .cal-day.selected {
+      background: #2563eb; color: white;
+    }
+    .cal-day.selected:hover { background: #1d4ed8; }
+    .cal-day.selected.today::after { background: white; }
+    .cal-day.other-month { color: #d1d5db; cursor: default; }
+    .cal-day.other-month:hover { background: transparent; }
+
+    /* Slot buttons */
+    .slot-btn {
+      font-size: 12px; font-family: monospace;
+      padding: 5px 9px; border-radius: 6px; border: 1px solid #e5e7eb;
+      background: white; color: #4b5563; cursor: pointer;
+      transition: background .1s, border-color .1s, color .1s;
+    }
+    .slot-btn:hover { border-color: #93c5fd; background: #eff6ff; }
+    .slot-btn.active { background: #2563eb; color: white; border-color: #2563eb; }
+
+    /* Scrollable left */
+    .left-scroll { max-height: calc(100vh - 120px); overflow-y: auto; }
+    @media (max-width: 1023px) { .left-scroll { max-height: none; } }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<div class="max-w-5xl mx-auto px-4 py-5">
+
+  <!-- Header -->
+  <div class="mb-5">
+    <h1 class="text-xl font-bold text-gray-900">可預約時段產生器</h1>
+    <p class="text-sm text-gray-500 mt-0.5">在日曆點選日期，再點選時段，右邊即時產生文字</p>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+
+    <!-- ── 左側 ── -->
+    <div class="left-scroll space-y-4 pr-1">
+
+      <!-- 月曆 -->
+      <div class="bg-white rounded-xl border p-4">
+        <!-- 月份導航 -->
+        <div class="flex items-center justify-between mb-3">
+          <button onclick="prevMonth()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          </button>
+          <span id="monthLabel" class="text-sm font-semibold text-gray-800"></span>
+          <button onclick="nextMonth()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+        <!-- 星期列 -->
+        <div class="grid grid-cols-7 mb-1">
+          <div class="text-center text-xs text-gray-400 py-1">日</div>
+          <div class="text-center text-xs text-gray-400 py-1">一</div>
+          <div class="text-center text-xs text-gray-400 py-1">二</div>
+          <div class="text-center text-xs text-gray-400 py-1">三</div>
+          <div class="text-center text-xs text-gray-400 py-1">四</div>
+          <div class="text-center text-xs text-gray-400 py-1">五</div>
+          <div class="text-center text-xs text-gray-400 py-1">六</div>
+        </div>
+        <!-- 日期格子 -->
+        <div id="calGrid" class="grid grid-cols-7 gap-0.5"></div>
+        <p class="text-xs text-gray-400 mt-3 text-center">點擊日期可選取／取消，已選日期標藍色</p>
+      </div>
+
+      <!-- 已選日期的時段卡片 -->
+      <div id="dateCards" class="space-y-3"></div>
+
+      <!-- 無選擇提示 -->
+      <div id="emptyHint" class="bg-white rounded-xl border border-dashed p-6 text-center text-gray-300 text-sm">
+        在上方日曆點選日期<br>
+        <span class="text-xs">可選多個日期</span>
+      </div>
+
+    </div>
+
+    <!-- ── 右側 ── -->
+    <div class="lg:sticky lg:top-5 space-y-4">
+
+      <!-- 問候語 / 結尾 -->
+      <div class="bg-white rounded-xl border p-4 space-y-3">
+        <h3 class="text-sm font-medium text-gray-700">自訂文字</h3>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">開頭問候語</label>
+          <input id="greeting" type="text" value="您好！目前可預約時段如下：" oninput="rerenderOutput()"
+            class="w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">結尾語</label>
+          <input id="closing" type="text" value="請問您哪個時段方便呢？😊" oninput="rerenderOutput()"
+            class="w-full text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
+        </div>
+      </div>
+
+      <!-- 輸出 -->
+      <div class="bg-white rounded-xl border overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b bg-gray-50">
+          <div class="text-sm font-medium text-gray-700">
+            輸出結果
+            <span id="slotCountBadge" class="ml-1.5 text-xs text-gray-400"></span>
+          </div>
+          <button id="copyBtn" onclick="copyText()" disabled
+            class="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+            </svg>
+            <span id="copyLabel">複製</span>
+          </button>
+        </div>
+        <div class="p-4 min-h-48">
+          <pre id="outputText" class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed font-sans hidden"></pre>
+          <div id="outputEmpty" class="h-40 flex items-center justify-center text-gray-300 text-sm">
+            <div class="text-center">
+              <svg class="w-9 h-9 mx-auto mb-2 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              </svg>
+              <p>選好時段後自動顯示</p>
+            </div>
+          </div>
+        </div>
+        <!-- 快捷 -->
+        <div class="border-t px-4 py-2 bg-gray-50 flex flex-wrap gap-x-3 gap-y-1">
+          <button onclick="clearAllSlots()" class="text-xs text-gray-400 hover:text-orange-500 transition-colors">清除全部時段</button>
+          <span class="text-gray-200 text-xs self-center">|</span>
+          <button onclick="clearAll()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">清除全部日期</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg transition-opacity duration-300 opacity-0 pointer-events-none z-50">
+  ✓ 已複製到剪貼簿
+</div>
+
+<script>
+const TIME_OPTIONS = ["10:00","11:00","11:30","13:00","14:00","15:00","16:00","17:00","18:30","19:00","20:00"]
+const DAY_ZH = ["日","一","二","三","四","五","六"]
+
+// ── State ──
+const dateMap = new Map()   // dateStr → Set<timeStr>
+let dateOrder = []           // sorted
+const today = new Date()
+const todayStr = isoDate(today.getFullYear(), today.getMonth(), today.getDate())
+let viewYear = today.getFullYear()
+let viewMonth = today.getMonth()
+
+// ── Helpers ──
+function isoDate(y, m, d) {
+  return `${y}-${String(m + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+}
+function parseDateStr(s) {
+  const [y, m, d] = s.split('-').map(Number)
+  return { y, m, d }
+}
+function formatDisplay(s) {
+  const { y, m, d } = parseDateStr(s)
+  const dow = new Date(y, m - 1, d).getDay()
+  return `${m}/${d}（${DAY_ZH[dow]}）`
+}
+function formatOutput(s) {
+  const { m, d } = parseDateStr(s)
+  return `${m}/${d}`
+}
+
+// ── Calendar ──
+function prevMonth() { viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear-- } renderCalendar() }
+function nextMonth() { viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++ } renderCalendar() }
+
+function renderCalendar() {
+  document.getElementById('monthLabel').textContent = `${viewYear} 年 ${viewMonth + 1} 月`
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay()
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+  const prevDays = new Date(viewYear, viewMonth, 0).getDate()
+
+  let html = ''
+
+  // Leading blanks (prev month)
+  for (let i = firstDow - 1; i >= 0; i--) {
+    html += `<div class="cal-day other-month">${prevDays - i}</div>`
+  }
+
+  // Current month
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = isoDate(viewYear, viewMonth, d)
+    const sel = dateMap.has(ds)
+    const isToday = ds === todayStr
+    let cls = 'cal-day'
+    if (sel) cls += ' selected'
+    if (isToday) cls += ' today'
+    html += `<div class="${cls}" onclick="toggleDate('${ds}')">${d}</div>`
+  }
+
+  // Trailing blanks
+  const total = firstDow + daysInMonth
+  const trail = (7 - (total % 7)) % 7
+  for (let i = 1; i <= trail; i++) {
+    html += `<div class="cal-day other-month">${i}</div>`
+  }
+
+  document.getElementById('calGrid').innerHTML = html
+}
+
+// ── Date toggle ──
+function toggleDate(ds) {
+  if (dateMap.has(ds)) {
+    dateMap.delete(ds)
+    dateOrder = dateOrder.filter(x => x !== ds)
+  } else {
+    dateMap.set(ds, new Set())
+    dateOrder.push(ds)
+    dateOrder.sort()
+  }
+  renderCalendar()
+  renderCards()
+  rerenderOutput()
+}
+
+// ── Slot toggle ──
+function toggleSlot(ds, t) {
+  const s = dateMap.get(ds)
+  if (!s) return
+  s.has(t) ? s.delete(t) : s.add(t)
+  // Update just the one button (no full rerender needed)
+  const btn = document.querySelector(`[data-date="${ds}"][data-time="${t}"]`)
+  if (btn) btn.classList.toggle('active', s.has(t))
+  updateSlotCount(ds)
+  rerenderOutput()
+}
+
+function updateSlotCount(ds) {
+  const el = document.getElementById(`count-${ds}`)
+  if (el) {
+    const n = dateMap.get(ds)?.size ?? 0
+    el.textContent = n > 0 ? `${n} 個時段` : '尚未選擇'
+    el.className = n > 0 ? 'text-xs text-blue-500 font-medium' : 'text-xs text-gray-300'
+  }
+}
+
+// ── Cards ──
+function renderCards() {
+  const container = document.getElementById('dateCards')
+  const hint = document.getElementById('emptyHint')
+
+  if (dateOrder.length === 0) {
+    container.innerHTML = ''
+    hint.style.display = 'block'
+    return
+  }
+  hint.style.display = 'none'
+
+  // Only add/remove cards, don't rebuild existing ones (preserve slot button state)
+  const existing = new Set([...container.querySelectorAll('[data-card]')].map(el => el.dataset.card))
+  const needed = new Set(dateOrder)
+
+  // Remove cards no longer needed
+  existing.forEach(ds => {
+    if (!needed.has(ds)) {
+      const el = container.querySelector(`[data-card="${ds}"]`)
+      if (el) el.remove()
+    }
+  })
+
+  // Add new cards / reorder
+  dateOrder.forEach((ds, i) => {
+    if (!existing.has(ds)) {
+      const card = buildCard(ds)
+      // Insert at correct position
+      const ref = container.children[i]
+      if (ref) container.insertBefore(card, ref)
+      else container.appendChild(card)
+    }
+  })
+
+  // Reorder existing if needed
+  dateOrder.forEach((ds, i) => {
+    const card = container.querySelector(`[data-card="${ds}"]`)
+    if (card && container.children[i] !== card) {
+      container.insertBefore(card, container.children[i] || null)
+    }
+  })
+}
+
+function buildCard(ds) {
+  const div = document.createElement('div')
+  div.dataset.card = ds
+  div.className = 'bg-white rounded-xl border p-4'
+
+  const slotBtns = TIME_OPTIONS.map(t => {
+    const active = dateMap.get(ds)?.has(t) ? 'active' : ''
+    return `<button class="slot-btn ${active}" data-date="${ds}" data-time="${t}" onclick="toggleSlot('${ds}','${t}')">${t}</button>`
+  }).join('')
+
+  div.innerHTML = `
+    <div class="flex items-center justify-between mb-3">
+      <span class="font-semibold text-sm text-gray-800">${formatDisplay(ds)}</span>
+      <div class="flex items-center gap-3">
+        <span id="count-${ds}" class="text-xs text-gray-300">尚未選擇</span>
+        <button onclick="toggleDate('${ds}')" class="text-gray-300 hover:text-red-400 transition-colors" title="移除此日期">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-1.5">${slotBtns}</div>`
+  return div
+}
+
+// ── Output ──
+function generateText() {
+  const greeting = document.getElementById('greeting').value.trim()
+  const closing = document.getElementById('closing').value.trim()
+  const lines = []
+  if (greeting) lines.push(greeting)
+  let total = 0
+  dateOrder.forEach(ds => {
+    const slots = dateMap.get(ds)
+    if (!slots || slots.size === 0) return
+    const sorted = TIME_OPTIONS.filter(t => slots.has(t))
+    total += sorted.length
+    lines.push(`${formatOutput(ds)} ${sorted.join('、')}`)
+  })
+  if (total === 0) return { text: '', count: 0 }
+  if (closing) lines.push(closing)
+  return { text: lines.join('\n'), count: total }
+}
+
+function rerenderOutput() {
+  const { text, count } = generateText()
+  const outputText = document.getElementById('outputText')
+  const outputEmpty = document.getElementById('outputEmpty')
+  const copyBtn = document.getElementById('copyBtn')
+  const badge = document.getElementById('slotCountBadge')
+
+  if (text) {
+    outputText.textContent = text
+    outputText.classList.remove('hidden')
+    outputEmpty.style.display = 'none'
+    copyBtn.disabled = false
+    badge.textContent = `（共 ${count} 個時段）`
+  } else {
+    outputText.classList.add('hidden')
+    outputEmpty.style.display = 'flex'
+    copyBtn.disabled = true
+    badge.textContent = ''
+  }
+}
+
+// ── Actions ──
+function clearAllSlots() {
+  dateOrder.forEach(ds => {
+    dateMap.get(ds)?.clear()
+    document.querySelectorAll(`[data-date="${ds}"]`).forEach(b => b.classList.remove('active'))
+    updateSlotCount(ds)
+  })
+  rerenderOutput()
+}
+
+function clearAll() {
+  dateMap.clear(); dateOrder = []
+  renderCalendar(); renderCards(); rerenderOutput()
+}
+
+async function copyText() {
+  const { text } = generateText()
+  if (!text) return
+  try { await navigator.clipboard.writeText(text) }
+  catch {
+    const ta = Object.assign(document.createElement('textarea'), { value: text })
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove()
+  }
+  const label = document.getElementById('copyLabel')
+  const toast = document.getElementById('toast')
+  label.textContent = '已複製 ✓'
+  toast.style.opacity = '1'
+  setTimeout(() => { toast.style.opacity = '0'; label.textContent = '複製' }, 2000)
+}
+
+// ── Init ──
+renderCalendar()
+renderCards()
+rerenderOutput()
+</script>
+</body>
+</html>
